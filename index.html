@@ -1,3 +1,233 @@
+import random
+import time
+
+# --- Game Constants ---
+BASE_FIRE_RATE = 0.7  # shots per second
+AMMO_REWARD_CORRECT = 5
+LIVES_START = 10
+WAVE_BOSS_INTERVAL = 5
+QUIZ_DURATION = 10  # seconds
+SHOP_DURATION = 30  # seconds
+
+# --- Upgrade Max Levels and Costs ---
+UPGRADES = {
+    'fire_rate': {'cost': 100, 'effect': 0.25, 'max_level': 5},
+    'ship_speed': {'cost': 150, 'effect': 0.20, 'max_level': 3},
+    'shield_generator': {'cost': 200, 'effect': 1, 'max_level': 3}
+}
+
+
+class Player:
+    def __init__(self):
+        self.lives = LIVES_START
+        self.score = 0
+        self.ammo = 50  # Starting ammo for initial wave
+        self.current_wave = 1
+        
+        # Upgrade Stats
+        self.upgrades = {k: 0 for k in UPGRADES.keys()}
+        self.shields = 0
+        
+    def get_fire_rate(self):
+        # Base + (level * effect)
+        boost = self.upgrades['fire_rate'] * UPGRADES['fire_rate']['effect']
+        return BASE_FIRE_RATE + boost
+
+    def get_speed_multiplier(self):
+        # Base 1.0 + (level * effect)
+        boost = self.upgrades['ship_speed'] * UPGRADES['ship_speed']['effect']
+        return 1.0 + boost
+        
+    def lose_life(self, count=1):
+        if self.shields > 0:
+            self.shields -= 1
+            print("Shield absorbed a hit!")
+        else:
+            self.lives -= count
+            if self.lives <= 0:
+                return "GAME_OVER"
+        return "HIT"
+
+    def buy_upgrade(self, key):
+        if self.upgrades[key] < UPGRADES[key]['max_level']:
+            cost = UPGRADES[key]['cost'] * (self.upgrades[key] + 1) # Example cumulative cost
+            if self.score >= cost:
+                self.score -= cost
+                self.upgrades[key] += 1
+                if key == 'shield_generator':
+                    self.shields += UPGRADES[key]['effect']
+                return True
+        return False
+
+
+class AlienWave:
+    def __init__(self, wave_number):
+        self.wave_number = wave_number
+        # Alien Count: Wave Number * 3
+        self.total_aliens = wave_number * 3 
+        self.aliens_remaining = self.total_aliens
+
+    def check_clear(self):
+        return self.aliens_remaining <= 0
+
+
+class Boss:
+    def __init__(self, wave_number, boss_type):
+        self.boss_type = boss_type
+        self.wave_number = wave_number
+        
+        # Boss Health Formula: Wave Number * 5
+        base_hp = wave_number * 5 
+        
+        # Fortress Boss has twice the health
+        if boss_type == "Fortress Boss":
+            self.health = base_hp * 2
+        else:
+            self.health = base_hp
+            
+        self.max_health = self.health
+
+    def take_damage(self, damage):
+        self.health -= damage
+        return self.health <= 0
+
+    def get_score_value(self):
+        # Boss Scoring: Points equal to the Boss's current Health value at defeat
+        return self.max_health 
+        
+    def get_move_speed(self):
+        # Fortress Boss moves 25% slower (0.75x speed)
+        return 0.75 if self.boss_type == "Fortress Boss" else 1.0
+
+
+class PowerUpSpawner:
+    def __init__(self):
+        self.chance = 0.10  # Starts at 10%
+        self.powerup_types = {
+            'BOMB': {'chance': 0.45, 'color': 'Orange'},
+            'TRIPLE_SHOT': {'chance': 0.175, 'color': 'Blue'},
+            'ROCKETS': {'chance': 0.15, 'color': 'Red'},
+            'EXTRA_LIFE': {'chance': 0.05, 'color': 'Pink'},
+            'MACHINE_GUN': {'chance': 0.175, 'color': 'Green'}
+        }
+        
+    def roll_spawn(self):
+        # Roll to see if *any* power-up spawns
+        if random.random() < self.chance:
+            self.chance = 0.10 # Reset chance upon spawn
+            
+            # Weighted random selection of Power-Up type
+            roll = random.random()
+            cumulative_chance = 0.0
+            for pu_type, data in self.powerup_types.items():
+                cumulative_chance += data['chance']
+                if roll <= cumulative_chance:
+                    return pu_type
+        else:
+            # Increase chance by 10% for the next wave
+            self.chance = min(1.0, self.chance + 0.10) 
+            return None # No power-up spawned
+
+
+# --- Main Game Loop Structure (Conceptual) ---
+def run_game():
+    player = Player()
+    powerup_spawner = PowerUpSpawner()
+    boss_list = ["Fortress Boss", "Spider Boss", "Crystal Boss", "Destroyer Boss"]
+    last_boss = None
+
+    while player.lives > 0:
+        wave_num = player.current_wave
+
+        # 1. Shop Phase (Every 5th wave)
+        if wave_num % WAVE_BOSS_INTERVAL == 0:
+            print(f"\n--- SHOP APPEARS (30s) before BOSS WAVE {wave_num} ---")
+            # Developer note: In a real game, this is where the shop UI and timer runs
+            # The player can spend score here before the boss fight.
+            
+        # 2. Boss Wave or Regular Wave
+        if wave_num % WAVE_BOSS_INTERVAL == 0:
+            # Boss selection logic: ensure different boss than last time
+            available_bosses = [b for b in boss_list if b != last_boss]
+            current_boss_type = random.choice(available_bosses)
+            last_boss = current_boss_type
+            
+            boss = Boss(wave_num, current_boss_type)
+            print(f"\n--- BOSS WAVE {wave_num} --- BOSS: {current_boss_type} (HP: {boss.health})")
+            
+            # --- Boss Wave Combat Loop (Conceptual) ---
+            # ... Code for boss movement, attacks, player firing, damage ...
+            
+            if boss.health <= 0:
+                score_gain = boss.get_score_value()
+                player.score += score_gain
+                print(f"Boss Defeated! Player Score: +{score_gain}")
+            else:
+                # Assuming Game Over condition handled by player.lose_life() during combat
+                pass
+                
+        else:
+            # Regular Alien Wave
+            wave = AlienWave(wave_num)
+            print(f"\n--- WAVE {wave_num} --- Aliens: {wave.total_aliens}")
+            
+            # Spawn Power-up (if applicable)
+            powerup = powerup_spawner.roll_spawn()
+            if powerup:
+                print(f"**A POWER-UP SPARKED**: {powerup} ({powerup_spawner.powerup_types[powerup]['color']})")
+                # Developer note: In a real game, spawn the power-up sprite here.
+
+            # --- Alien Wave Combat Loop (Conceptual) ---
+            # ... Code for alien movement, player firing, scoring, alien reaching bottom ...
+            
+            # Simulate wave clear:
+            # If (wave cleared and player lives > 0):
+            player.score += wave.total_aliens # Points for defeat
+            print(f"Wave {wave_num} cleared!")
+            
+            # 3. Quiz Phase (After non-boss waves)
+            print(f"\n--- QUIZ BREAK (10s) ---")
+            
+            # In a real game, a quiz UI and timer starts here
+            quiz_loop(player) # Run quiz
+            
+        player.current_wave += 1
+
+    print("\n--- GAME OVER ---")
+    print(f"Final Score: {player.score}")
+    print(f"Waves Survived: {player.current_wave - 1}")
+
+
+# --- QUIZ FUNCTION (Conceptual) ---
+incorrectly_answered_questions = []
+
+def quiz_loop(player):
+    # Retrieve a question (logic to select/remove/recall questions goes here)
+    question, answer = get_random_question() # See Part 2 for the bank
+    
+    # Check for recalled question chance
+    if incorrectly_answered_questions and random.random() < 0.25:
+        q_data = random.choice(incorrectly_answered_questions)
+        question, answer = q_data['q'], q_data['a']
+        
+    print(f"Question: {question}")
+    # In a real game: get player input within the 10s limit
+    
+    is_correct = True # Simplified for this demo
+    
+    if is_correct:
+        player.ammo += AMMO_REWARD_CORRECT
+        print(f"CORRECT! +{AMMO_REWARD_CORRECT} Ammo. Total Ammo: {player.ammo}")
+        # Remove from recall list if it was a recalled question
+        if {'q': question, 'a': answer} in incorrectly_answered_questions:
+            incorrectly_answered_questions.remove({'q': question, 'a': answer})
+    else:
+        player.lose_life()
+        print(f"INCORRECT! -1 Life. Lives Remaining: {player.lives}")
+        # Add to recall list
+        incorrectly_answered_questions.append({'q': question, 'a': answer})
+
+# run_game() # Uncomment to run the conceptual structure
 QUIZ_BANK = {
     "Structure of the Earth": [
         ("T/F: The mantle is the thinnest layer of the Earth.", "False"),
